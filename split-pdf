@@ -1,0 +1,147 @@
+#!/usr/bin/env xonsh
+# -*- python -*-
+
+# Copyright 2019 by Chris Osborn <fozztexx@fozztexx.com>
+#
+# This file is part of split-pdf
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License at <http://www.gnu.org/licenses/> for
+# more details.
+
+import argparse
+import os
+import sys
+
+IMG_TYPE = ".png"
+
+def build_argparser():
+  parser = argparse.ArgumentParser()
+  parser.add_argument("pdf", help="pdf to split")
+  parser.add_argument("--left", default=50, type=int, help="left percentage")
+  parser.add_argument("--right", type=int, help="right percentage")
+  parser.add_argument("--overlap", type=int, help="top/bottom overlap")
+  parser.add_argument("--rotate", default=0, type=float, help="rotate degrees")
+  parser.add_argument("--firstislast", action="store_true",
+                      help="left half of first page should be last")
+  parser.add_argument("--dontshrink", action="store_true",
+                      help="Don't use noteshrink to reduce colors")
+  parser.add_argument("--onebit", action="store_true", help="Process pages as 1bit")
+  parser.add_argument("--unstapled", action="store_true",
+                      help="Document was unstapled to scan, pages alternate between sides")
+  parser.add_argument("--reverse", action="store_true",
+                      help="Document was scanned back to front")
+  return parser
+
+def main():
+  args = build_argparser().parse_args()
+
+  cwd = os.getcwd()
+  
+  pdf = os.path.abspath(args.pdf)
+  tmp = ""#"/tmp/"
+  tmp += os.path.basename(__file__)
+  tmp += "." + str(os.getpid())
+
+  mkdir @(tmp)
+  cd @(tmp)
+
+  pdfimages -png @(pdf) page
+
+  pages = g`page-[0-9][0-9][0-9].*`
+
+  left = "%i%%x100%%" % (args.left)
+  if not args.right:
+    right = "%i%%x100%%" % (100 - args.left)
+  else:
+    right = "%i%%x100%%" % (args.right)
+
+  if args.overlap is not None:
+    cpages = pages[::2]
+    for p1 in cpages:
+      print(p1, end='\r')
+      p2 = pages[pages.index(p1) + 1]
+      v = $(identify -format '%w %h' @(p1))
+      w1, h1 = [int(x) for x in v.split()]
+      v = $(identify -format '%w %h' @(p2))
+      w2, h2 = [int(x) for x in v.split()]
+
+      height = h1 + h2 - args.overlap
+      base, ext = os.path.splitext(p1)
+      out = base + "a" + IMG_TYPE
+
+      convert -size @(w1)x@(height) xc:None -background white @(p1) -gravity northwest -composite @(p2) -gravity southwest -composite @(out)
+      rm @(p1)
+      rm @(p2)
+      mv @(out) @(base+IMG_TYPE)
+
+  pages = g`page-[0-9][0-9][0-9].*`
+  for img in pages:
+    print(img, end='\r')
+    base, ext = os.path.splitext(img)
+    out1 = base + "a" + IMG_TYPE
+    out2 = base + "b" + IMG_TYPE
+    convert -rotate @(args.rotate) @(img) -gravity west -crop @(left) +repage @(out1)
+    convert -rotate @(args.rotate) @(img) -gravity east -crop @(right) +repage @(out2)
+
+    # width = int($(identify -format %w @(img))) / 2
+    # w1 = int($(identify -format %w @(out1)))
+    # w2 = int($(identify -format %w @(out2)))
+    # out1a = base + "aa" + IMG_TYPE
+    # out2b = base + "bb" + IMG_TYPE
+    # convert @(out1) -gravity east -background white -splice @(width - w1)x0 @(out1a)
+    # mv @(out1a) @(out1)
+    # convert @(out2) -gravity west -background white -splice @(width - w2)x0 @(out2b)
+    # mv @(out2b) @(out2)
+
+  pages = g`page-[0-9][0-9][0-9]?.*`
+  if args.firstislast:
+    last = "page-%03i" % (int(pages[-1][5:8]) + 1) + pages[0][8:]
+    mv @(pages[0]) @(last)
+    pages.pop(0)
+    pages.append(last)
+
+  if args.unstapled:
+    np = len(pages)
+    hnp = int(np / 2)
+    repages = []
+    for i in range(np):
+      h = i % hnp
+      pagenum = h * 2 + 1 - h % 2      
+      pagenum = abs((np - i % 2 * 2) * int(i / hnp) - pagenum)
+      if args.reverse:
+        pagenum = np - i % 2 * 2 - pagenum
+      repages.append(pages[pagenum])
+    pages = repages
+    
+  if not args.dontshrink:
+    # noteshrink.py -R -K @(pages)
+    noteshrink.py -K @(pages)
+  elif args.onebit:
+    jbig2 -s -p -v @(pages)
+    jbig2-pdf output > output.pdf
+  else:
+    for page in pages:
+      print(page, end=' ')
+    print()
+    sys.exit(0)
+    #convert @(pages) output.pdf
+
+  # dest = os.path.dirname(pdf)
+  dest = cwd
+  mv output.pdf @(dest)
+
+  cd
+  rm -rf @(tmp)
+  
+  return
+
+if __name__ == '__main__':
+  sys.exit(main() or 0)
