@@ -38,6 +38,8 @@ def build_argparser():
                       help="Document was unstapled to scan, pages alternate between sides")
   parser.add_argument("--reverse", action="store_true",
                       help="Document was scanned back to front")
+  parser.add_argument("--white", action="store_true",
+                      help="Make background white")
   return parser
 
 def main():
@@ -46,6 +48,10 @@ def main():
   cwd = os.getcwd()
   
   pdf = os.path.abspath(args.pdf)
+  if not os.path.exists(pdf):
+    print("No such file", pdf)
+    exit(1)
+    
   tmp = ""#"/tmp/"
   tmp += os.path.basename(__file__)
   tmp += "." + str(os.getpid())
@@ -122,14 +128,18 @@ def main():
     pages = repages
     
   if not args.dontshrink:
+    flags = []
+    if args.white:
+      flags.append("-w")
     # noteshrink.py -R -K @(pages)
-    noteshrink.py -K @(pages)
+    noteshrink.py -K @(flags) @(pages)
   elif args.onebit:
     jbig2 -s -p -v @(pages)
     jbig2-pdf output > output.pdf
   else:
-    for page in pages:
-      print(page, end=' ')
+    for idx, page in enumerate(pages):
+      new_page = "page%04i.png" % (idx)
+      ln @(page) @(new_page)
     print()
     sys.exit(0)
     #convert @(pages) output.pdf
