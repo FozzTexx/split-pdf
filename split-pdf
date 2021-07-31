@@ -20,6 +20,7 @@ import argparse
 import os, sys
 import subprocess
 import glob
+import magic
 
 IMG_TYPE = ".png"
 
@@ -55,28 +56,45 @@ def main():
     exit(1)
 
   if not args.directory:
-    tmp = "" #"/tmp/"
-    tmp += os.path.basename(__file__)
+    if os.path.isdir(pdf):
+      tmp = pdf
+    else:
+      tmp = os.path.dirname(args.pdf)
+    tmp = os.path.basename(__file__)
     tmp += "." + str(os.getpid())
-
     os.mkdir(tmp)
     os.chdir(tmp)
   else:
     os.chdir(args.directory)
 
-  cmd = ["pdfimages", "-list", pdf]
-  images = subprocess.run(cmd, stdout=subprocess.PIPE)
-  images = [x.split() for x in images.stdout.decode("utf-8").splitlines()]
+  if os.path.isdir(args.pdf):
+    ipath = os.path.join(pdf, "*")
+    files = glob.glob(ipath)
+    pages = []
+    m = magic.Magic(mime=True)
+    for f in files:
+      if not os.path.isdir(f):
+        ftype = m.from_file(f)
+        if ftype.startswith("image/"):
+          pages.append(f)
+  else:
+    cmd = ["pdfimages", "-list", pdf]
+    images = subprocess.run(cmd, stdout=subprocess.PIPE)
+    images = [x.split() for x in images.stdout.decode("utf-8").splitlines()]
+    images = images[2:]
 
-  cmd = ["pdfimages", "-png", pdf, "page"]
-  err = subprocess.call(cmd)
+    cmd = ["pdfimages", "-png", pdf, "page"]
+    err = subprocess.call(cmd)
+    if err != 0:
+      print("Failed: ", cmd, file=sys.stderr)
+      exit(1)
 
-  for img in images[2:]:
-    if img[2] != "image":
-      path = "page-%03i.png" % (int(img[1]))
-      os.remove(path)
+    for img in images:
+      if img[2] != "image":
+        path = "page-%03i.png" % (int(img[1]))
+        os.remove(path)
   
-  pages = glob.glob("page-[0-9][0-9][0-9].*")
+    pages = glob.glob("page-[0-9][0-9][0-9].*")
 
   left = "%i%%x100%%" % (args.left)
   if not args.right:
@@ -84,40 +102,51 @@ def main():
   else:
     right = "%i%%x100%%" % (args.right)
 
-  if args.overlap is not None:
-    cpages = pages[::2]
-    for p1 in cpages:
-      print(p1, end='\r')
-      p2 = pages[pages.index(p1) + 1]
-      v = subprocess.run(["identify", "-format", "%w %h", p1], stdout=subprocess.PIPE)
-      w1, h1 = [int(x) for x in v.split()]
-      v = subprocess.run(["identify", "-format", "%w %h", p1], stdout=subprocess.PIPE)
-      w2, h2 = [int(x) for x in v.split()]
+  # if args.overlap is not None:
+  #   cpages = pages[::2]
+  #   for p1 in cpages:
+  #     print(p1, end='\r')
+  #     p2 = pages[pages.index(p1) + 1]
+  #     v = subprocess.run(["identify", "-format", "%w %h", p1], stdout=subprocess.PIPE)
+  #     w1, h1 = [int(x) for x in v.split()]
+  #     v = subprocess.run(["identify", "-format", "%w %h", p1], stdout=subprocess.PIPE)
+  #     w2, h2 = [int(x) for x in v.split()]
 
-      height = h1 + h2 - args.overlap
-      base, ext = os.path.splitext(p1)
-      out = base + "a" + IMG_TYPE
+  #     height = h1 + h2 - args.overlap
+  #     base, ext = os.path.splitext(p1)
+  #     out = base + "a" + IMG_TYPE
 
-      cmd = ["convert", "-size",  w1 + "x" + height, "xc:None", "-background", "white", p1,
-             "-gravity", "northwest", "-composite", p2,
-             "-gravity", "southwest", "-composite", out]
-      err = subprocess.call(cmd)
-      os.remove(p1)
-      os.remove(p2)
-      os.rename(out, base+IMG_TYPE)
+  #     cmd = ["convert", "-size",  w1 + "x" + height, "xc:None", "-background", "white", p1,
+  #            "-gravity", "northwest", "-composite", p2,
+  #            "-gravity", "southwest", "-composite", out]
+  #     err = subprocess.call(cmd)
+  #     if err != 0:
+  #       print("Failed: ", cmd, file=sys.stderr)
+  #       exit(1)
+  #     os.remove(p1)
+  #     os.remove(p2)
+  #     os.rename(out, base+IMG_TYPE)
+  #   pages = glob.glob("page-[0-9][0-9][0-9].*")
 
-  pages = sorted(glob.glob("page-[0-9][0-9][0-9].*"))
-  for img in pages:
+  pages = sorted(pages)
+
+  for idx, img in enumerate(pages):
     print(img, end='\r')
-    base, ext = os.path.splitext(img)
-    out1 = base + "a" + IMG_TYPE
-    out2 = base + "b" + IMG_TYPE
+    base, ext = os.path.splitext(os.path.basename(img))
+    out1 = ("page-%03ia" + IMG_TYPE) % (idx + 1)
+    out2 = ("page-%03ib" + IMG_TYPE) % (idx + 1)
     cmd = ["convert", "-rotate", str(args.rotate), img, "-gravity", "west",
            "-crop", left, "+repage", out1]
     err = subprocess.call(cmd)
+    if err != 0:
+      print("Failed: ", cmd, file=sys.stderr)
+      exit(1)
     cmd = ["convert", "-rotate", str(args.rotate), img, "-gravity", "east",
            "-crop", right, "+repage", out2]
     err = subprocess.call(cmd)
+    if err != 0:
+      print("Failed: ", cmd, file=sys.stderr)
+      exit(1)
 
     # width = int($(identify -format %w @(img))) / 2
     # w1 = int($(identify -format %w @(out1)))
@@ -158,10 +187,16 @@ def main():
     cmd.extend(flags)
     cmd.extend(pages)
     err = subprocess.call(cmd)
+    if err != 0:
+      print("Failed: ", cmd, file=sys.stderr)
+      exit(1)
   elif args.onebit:
     cmd = ["jbig2", "-s", "-p", "-v"]
     cmd.append(pages)
     err = subprocess.call(cmd)
+    if err != 0:
+      print("Failed: ", cmd, file=sys.stderr)
+      exit(1)
     os.system("jbig2-pdf output > output.pdf")
   else:
     for idx, page in enumerate(pages):
@@ -172,8 +207,9 @@ def main():
     #convert @(pages) output.pdf
 
   base, ext = os.path.splitext(pdf)
-  dest = base + "-split" + ext
+  dest = base + "-split.pdf"
   os.rename("output.pdf", dest)
+  print("Saved output.pdf to", dest)
 
   os.chdir("..")
   #os.system("rm -rf " + tmp)
