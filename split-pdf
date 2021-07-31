@@ -59,7 +59,7 @@ def main():
     if os.path.isdir(pdf):
       tmp = pdf
     else:
-      tmp = os.path.dirname(args.pdf)
+      tmp = os.path.dirname(pdf)
     tmp = os.path.basename(__file__)
     tmp += "." + str(os.getpid())
     os.mkdir(tmp)
@@ -96,39 +96,41 @@ def main():
   
     pages = glob.glob("page-[0-9][0-9][0-9].*")
 
+  pages = sorted(pages)
+
   left = "%i%%x100%%" % (args.left)
   if not args.right:
     right = "%i%%x100%%" % (100 - args.left)
   else:
     right = "%i%%x100%%" % (args.right)
 
-  # if args.overlap is not None:
-  #   cpages = pages[::2]
-  #   for p1 in cpages:
-  #     print(p1, end='\r')
-  #     p2 = pages[pages.index(p1) + 1]
-  #     v = subprocess.run(["identify", "-format", "%w %h", p1], stdout=subprocess.PIPE)
-  #     w1, h1 = [int(x) for x in v.split()]
-  #     v = subprocess.run(["identify", "-format", "%w %h", p1], stdout=subprocess.PIPE)
-  #     w2, h2 = [int(x) for x in v.split()]
+  if args.overlap is not None:
+    cpages = []
+    for idx in range(len(pages)):
+      p1 = pages[idx]
+      p2 = pages[idx + 1]
+      print(p1, end='\r')
+      v = subprocess.run(["identify", "-format", "%w %h", p1], stdout=subprocess.PIPE)
+      w1, h1 = [int(x) for x in v.split()]
+      v = subprocess.run(["identify", "-format", "%w %h", p2], stdout=subprocess.PIPE)
+      w2, h2 = [int(x) for x in v.split()]
 
-  #     height = h1 + h2 - args.overlap
-  #     base, ext = os.path.splitext(p1)
-  #     out = base + "a" + IMG_TYPE
+      height = h1 + h2 - args.overlap
+      base, ext = os.path.splitext(p1)
+      out = base + "a" + IMG_TYPE
 
-  #     cmd = ["convert", "-size",  w1 + "x" + height, "xc:None", "-background", "white", p1,
-  #            "-gravity", "northwest", "-composite", p2,
-  #            "-gravity", "southwest", "-composite", out]
-  #     err = subprocess.call(cmd)
-  #     if err != 0:
-  #       print("Failed: ", cmd, file=sys.stderr)
-  #       exit(1)
-  #     os.remove(p1)
-  #     os.remove(p2)
-  #     os.rename(out, base+IMG_TYPE)
-  #   pages = glob.glob("page-[0-9][0-9][0-9].*")
-
-  pages = sorted(pages)
+      cmd = ["convert", "-size",  str(w1) + "x" + str(height), "xc:None",
+             "-background", "white", p1,
+             "-gravity", "northwest", "-composite", p2,
+             "-gravity", "southwest", "-composite", out]
+      err = subprocess.call(cmd)
+      if err != 0:
+        print("Failed: ", cmd, file=sys.stderr)
+        exit(1)
+      os.remove(p1)
+      os.remove(p2)
+      cpages.append(out)
+    pages = cpages
 
   for idx, img in enumerate(pages):
     print(img, end='\r')
@@ -206,8 +208,12 @@ def main():
     sys.exit(0)
     #convert @(pages) output.pdf
 
-  base, ext = os.path.splitext(pdf)
-  dest = base + "-split.pdf"
+  if os.path.isdir(pdf):
+    dpath = pdf
+  else:
+    dpath = os.path.dirname(pdf)
+  base, ext = os.path.splitext(os.path.basename(pdf))
+  dest = os.path.join(dpath, base + "-split.pdf")
   os.rename("output.pdf", dest)
   print("Saved output.pdf to", dest)
 
