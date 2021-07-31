@@ -1,4 +1,4 @@
-This is a little xonsh script I've been putting together to split up
+This is a little python script I've been putting together to split up
 pages in a PDF that were scanned as duplex, where there are two pages
 side by side on each page of the PDF. I'm sure it needs many more
 options and refinements but for the moment it can handle a few things.
